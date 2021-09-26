@@ -54,10 +54,16 @@ module APTDistsMerge
           end
         when ".xz"
           IO.popen(["xz", "--stdout"], "r+") do |xz|
-            xz.write(data)
-            xz.close_write
+            writer = Thread.new do
+              xz.write(data)
+              xz.close_write
+            end
             File.open("#{path}#{extension}", "wb") do |output|
-              IO.copy_stream(xz, output)
+              reader = Thread.new do
+                IO.copy_stream(xz, output)
+              end
+              writer.join
+              reader.join
             end
           end
         else
