@@ -9,6 +9,13 @@ module APTDistsMerge
     end
 
     def merge
+      unless File.exist?(@base_dir)
+        FileUtils.rm_rf(@merged_dir)
+        FileUtils.mkdir_p(@merged_dir)
+        FileUtils.cp_r(Dir.glob("#{@incoming_dir}/*"), @merged_dir)
+        return true
+      end
+
       components = (detect_components(@base_dir) |
                     detect_components(@incoming_dir))
       components.each do |component|

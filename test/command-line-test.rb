@@ -216,4 +216,37 @@ APT::FTPArchive::Release::Description "#{@repository_description}";
         read_content("#{output_dists_dir}/main/source/Sources.xz"),
       ])
   end
+
+  def test_no_base
+    output_dists_dir = "#{@dir}/output/#{@relative_dists_dir}"
+    assert_equal([true, ""],
+                 run_command("nonexistent",
+                             "#{@incoming_dir}/#{@relative_dists_dir}",
+                             output_dists_dir))
+    assert_equal(
+      [
+        normalize_release(read_content("#{@incoming_dists_dir}/Release"), nil),
+        read_content("#{@incoming_dists_dir}/main/Contents-amd64.gz"),
+        read_content("#{@incoming_dists_dir}/main/binary-amd64/Packages"),
+        read_content("#{@incoming_dists_dir}/main/binary-amd64/Packages.gz"),
+        read_content("#{@incoming_dists_dir}/main/binary-amd64/Packages.xz"),
+        read_content("#{@incoming_dists_dir}/main/binary-amd64/Release"),
+        read_content("#{@incoming_dists_dir}/main/source/Release"),
+        read_content("#{@incoming_dists_dir}/main/source/Sources"),
+        read_content("#{@incoming_dists_dir}/main/source/Sources.gz"),
+        read_content("#{@incoming_dists_dir}/main/source/Sources.xz"),
+      ],
+      [
+        normalize_release(read_content("#{output_dists_dir}/Release"), nil),
+        read_content("#{output_dists_dir}/main/Contents-amd64.gz"),
+        read_content("#{output_dists_dir}/main/binary-amd64/Packages"),
+        read_content("#{output_dists_dir}/main/binary-amd64/Packages.gz"),
+        read_content("#{output_dists_dir}/main/binary-amd64/Packages.xz"),
+        read_content("#{output_dists_dir}/main/binary-amd64/Release"),
+        read_content("#{output_dists_dir}/main/source/Release"),
+        read_content("#{output_dists_dir}/main/source/Sources"),
+        read_content("#{output_dists_dir}/main/source/Sources.gz"),
+        read_content("#{output_dists_dir}/main/source/Sources.xz"),
+      ])
+  end
 end
