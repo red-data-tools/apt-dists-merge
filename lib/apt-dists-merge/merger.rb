@@ -196,7 +196,10 @@ module APTDistsMerge
     end
 
     def merge_packages_data(base, incoming)
-      (base + incoming).sort do |a, b|
+      packages = (base + incoming).uniq do |metadata,|
+        [metadata["Package"], metadata["Version"]]
+      end
+      packages.sort do |a, b|
         a_metadata = a[0]
         b_metadata = b[0]
         a_package = a_metadata["Package"]
