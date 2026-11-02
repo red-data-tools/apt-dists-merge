@@ -1,5 +1,11 @@
 # NEWS
 
+## 1.0.3 - 2026-11-02
+
+### Improvements
+
+  * Added support for empty base and incoming.
+
 ## 1.0.2 - 2021-10-02
 
 ### Improvements
