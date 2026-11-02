@@ -2,6 +2,8 @@ require "fileutils"
 
 module APTDistsMerge
   class Merger
+    EXTENSIONS = ["", ".gz", ".xz"]
+
     def initialize(base_dir, incoming_dir, merged_dir)
       @base_dir = base_dir
       @incoming_dir = incoming_dir
@@ -27,26 +29,40 @@ module APTDistsMerge
 
     private
     def detect_extensions(base_path)
-      Dir.glob("#{base_path}*").collect do |path|
-        path.gsub(/\A#{Regexp.escape(base_path)}/, "")
+      EXTENSIONS.select do |extension|
+        File.exist?("#{base_path}#{extension}")
       end
     end
 
+    def data_exist?(path)
+      not detect_extensions(path).empty?
+    end
+
+    def detect_unsupported_paths(base_path)
+      paths = Dir.glob("#{base_path}*").select do |path|
+        File.file?(path)
+      end
+      supported_paths = detect_extensions(base_path).collect do |extension|
+        "#{base_path}#{extension}"
+      end
+      paths - supported_paths
+    end
+
     def read_data(path)
-      if File.exist?(path)
-        File.read(path)
-      elsif File.exist?("#{path}.gz")
-        real_path = "#{path}.gz"
+      extension = detect_extensions(path).first
+      return nil if extension.nil?
+      real_path = "#{path}#{extension}"
+      case extension
+      when ".gz"
         Zlib::GzipReader.open(real_path) do |input|
           input.read
         end
-      elsif File.exist?("#{path}.xz")
-        real_path = "#{path}.xz"
+      when ".xz"
         IO.popen(["xz", "--decompress", "--stdout", real_path]) do |input|
           input.read
         end
       else
-        nil
+        File.read(real_path)
       end
     end
 
@@ -79,6 +95,36 @@ module APTDistsMerge
           end
         end
       end
+    end
+
+    def copy_data(path, merged_path)
+      FileUtils.mkdir_p(File.dirname(merged_path))
+      detect_extensions(path).each do |extension|
+        FileUtils.cp("#{path}#{extension}", "#{merged_path}#{extension}")
+      end
+    end
+
+    def merge_data(base_path, incoming_path, merged_path)
+      [base_path, incoming_path].each do |path|
+        next if data_exist?(path)
+        unsupported_paths = detect_unsupported_paths(path)
+        next if unsupported_paths.empty?
+        $stderr.puts("Unsupported format: #{unsupported_paths.join(", ")}")
+        return false
+      end
+      if not data_exist?(base_path)
+        copy_data(incoming_path, merged_path)
+      elsif not data_exist?(incoming_path)
+        copy_data(base_path, merged_path)
+      else
+        base = read_data(base_path)
+        incoming = read_data(incoming_path)
+        write_data(yield(base, incoming),
+                   merged_path,
+                   detect_extensions(base_path) |
+                   detect_extensions(incoming_path))
+      end
+      true
     end
 
     def release_path(dir)
@@ -153,15 +199,11 @@ module APTDistsMerge
     def merge_contents(component, arch)
       base_path = contents_path(@base_dir, component, arch)
       incoming_path = contents_path(@incoming_dir, component, arch)
-      base = read_data(base_path)
-      incoming = read_data(incoming_path)
-      merged = (base.lines | incoming.lines).sort
       merged_path = contents_path(@merged_dir, component, arch)
-      write_data(merged.join,
-                 merged_path,
-                 detect_extensions(base_path) |
-                 detect_extensions(incoming_path))
-      true
+      merge_data(base_path, incoming_path, merged_path) do |base, incoming|
+        merged = (base.lines | incoming.lines).sort
+        merged.join
+      end
     end
 
     def parse_deb822(content)
@@ -179,8 +221,8 @@ module APTDistsMerge
       data
     end
 
-    def read_packages(path)
-      read_data(path).split("\n\n").collect do |content|
+    def parse_packages(data)
+      data.split("\n\n").collect do |content|
         [parse_deb822(content), content]
       end
     end
@@ -220,15 +262,12 @@ module APTDistsMerge
     def merge_packages(component, arch)
       base_path = packages_path(@base_dir, component, arch)
       incoming_path = packages_path(@incoming_dir, component, arch)
-      base = read_packages(base_path)
-      incoming = read_packages(incoming_path)
-      merged = merge_packages_data(base, incoming)
       merged_path = packages_path(@merged_dir, component, arch)
-      write_data(merged.collect {|_, content| "#{content}\n\n"}.join,
-                 merged_path,
-                 detect_extensions(base_path) |
-                 detect_extensions(incoming_path))
-      true
+      merge_data(base_path, incoming_path, merged_path) do |base, incoming|
+        merged = merge_packages_data(parse_packages(base),
+                                     parse_packages(incoming))
+        merged.collect {|_, content| "#{content}\n\n"}.join
+      end
     end
 
     def merge_binary_release(component, arch)
@@ -254,15 +293,12 @@ module APTDistsMerge
     def merge_sources(component)
       base_path = sources_path(@base_dir, component)
       incoming_path = sources_path(@incoming_dir, component)
-      base = read_packages(base_path)
-      incoming = read_packages(incoming_path)
-      merged = merge_packages_data(base, incoming)
       merged_path = sources_path(@merged_dir, component)
-      write_data(merged.collect {|_, content| "#{content}\n\n"}.join,
-                 merged_path,
-                 detect_extensions(base_path) |
-                 detect_extensions(incoming_path))
-      true
+      merge_data(base_path, incoming_path, merged_path) do |base, incoming|
+        merged = merge_packages_data(parse_packages(base),
+                                     parse_packages(incoming))
+        merged.collect {|_, content| "#{content}\n\n"}.join
+      end
     end
 
     def merge_source_release(component)

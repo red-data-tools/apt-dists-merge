@@ -71,7 +71,7 @@ Architecture: #{architecture}
     end
   end
 
-  def generate_apt_ftp_archive_generate_conf(output)
+  def generate_apt_ftp_archive_generate_conf(output, architectures)
     output.puts(<<-CONF)
 Dir::ArchiveDir ".";
 Dir::CacheDir ".";
@@ -80,25 +80,33 @@ TreeDefault::SrcDirectory "pool/#{@component}";
 Default::Packages::Extensions ".deb";
 Default::Packages::Compress ". gzip xz";
 Default::Sources::Compress ". gzip xz";
+    CONF
 
-BinDirectory "#{@relative_dists_dir}/#{@component}/binary-amd64" {
-  Packages "#{@relative_dists_dir}/#{@component}/binary-amd64/Packages";
-  Contents "#{@relative_dists_dir}/#{@component}/Contents-amd64";
+    architectures.each do |architecture|
+      output.puts(<<-CONF)
+
+BinDirectory "#{@relative_dists_dir}/#{@component}/binary-#{architecture}" {
+  Packages "#{@relative_dists_dir}/#{@component}/binary-#{architecture}/Packages";
+  Contents "#{@relative_dists_dir}/#{@component}/Contents-#{architecture}";
   SrcPackages "#{@relative_dists_dir}/#{@component}/source/Sources";
 };
+      CONF
+    end
+
+    output.puts(<<-CONF)
 
 Tree "#{@relative_dists_dir}" {
   Sections "#{@component}";
-  Architectures "amd64 source";
+  Architectures "#{architectures.join(" ")} source";
 };
     CONF
   end
 
-  def generate_apt_ftp_archive_release_conf(output)
+  def generate_apt_ftp_archive_release_conf(output, architectures)
     output.puts(<<-CONF)
 APT::FTPArchive::Release::Origin "#{@repository_label}";
 APT::FTPArchive::Release::Label "#{@repository_label}";
-APT::FTPArchive::Release::Architectures "amd64";
+APT::FTPArchive::Release::Architectures "#{architectures.join(" ")}";
 APT::FTPArchive::Release::Codename "#{@code_name}";
 APT::FTPArchive::Release::Suite "#{@code_name}";
 APT::FTPArchive::Release::Components "#{@component}";
@@ -106,14 +114,17 @@ APT::FTPArchive::Release::Description "#{@repository_description}";
     CONF
   end
 
-  def setup_dist(base_dir)
+  def setup_dist(base_dir, architectures=["amd64"])
     dists_dir = "#{base_dir}/#{@relative_dists_dir}"
+    FileUtils.rm_rf(dists_dir)
 
     generate_apt_release(dists_dir, "source")
-    generate_apt_release(dists_dir, "amd64")
+    architectures.each do |architecture|
+      generate_apt_release(dists_dir, architecture)
+    end
 
     generate_conf_file = Tempfile.new("apt-ftparchive-generate.conf")
-    generate_apt_ftp_archive_generate_conf(generate_conf_file)
+    generate_apt_ftp_archive_generate_conf(generate_conf_file, architectures)
     generate_conf_file.close
     Dir.chdir(base_dir) do
       system("apt-ftparchive",
@@ -123,7 +134,7 @@ APT::FTPArchive::Release::Description "#{@repository_description}";
     end
 
     release_conf_file = Tempfile.new("apt-ftparchive-release.conf")
-    generate_apt_ftp_archive_release_conf(release_conf_file)
+    generate_apt_ftp_archive_release_conf(release_conf_file, architectures)
     release_conf_file.close
     release_file = Tempfile.new("apt-ftparchive-release")
     system("apt-ftparchive",
@@ -248,5 +259,86 @@ APT::FTPArchive::Release::Description "#{@repository_description}";
         read_content("#{output_dists_dir}/main/source/Sources.gz"),
         read_content("#{output_dists_dir}/main/source/Sources.xz"),
       ])
+  end
+
+  def test_base_only_architecture
+    setup_dist(@base_dir, ["amd64", "i386"])
+    output_dists_dir = "#{@dir}/output/#{@relative_dists_dir}"
+    assert_equal([true, ""],
+                 run_command("#{@base_dir}/#{@relative_dists_dir}",
+                             "#{@incoming_dir}/#{@relative_dists_dir}",
+                             output_dists_dir))
+    output_release = read_content("#{output_dists_dir}/Release")
+    assert_equal(
+      [
+        "amd64 i386",
+        read_content("#{@all_dists_dir}/main/binary-amd64/Packages"),
+        read_content("#{@base_dists_dir}/main/Contents-i386.gz"),
+        read_content("#{@base_dists_dir}/main/binary-i386/Packages"),
+        read_content("#{@base_dists_dir}/main/binary-i386/Packages.gz"),
+        read_content("#{@base_dists_dir}/main/binary-i386/Packages.xz"),
+        read_content("#{@base_dists_dir}/main/binary-i386/Release"),
+      ],
+      [
+        output_release[/^Architectures: (.+)$/, 1],
+        read_content("#{output_dists_dir}/main/binary-amd64/Packages"),
+        read_content("#{output_dists_dir}/main/Contents-i386.gz"),
+        read_content("#{output_dists_dir}/main/binary-i386/Packages"),
+        read_content("#{output_dists_dir}/main/binary-i386/Packages.gz"),
+        read_content("#{output_dists_dir}/main/binary-i386/Packages.xz"),
+        read_content("#{output_dists_dir}/main/binary-i386/Release"),
+      ])
+  end
+
+  def test_incoming_only_architecture
+    setup_dist(@incoming_dir, ["amd64", "i386"])
+    output_dists_dir = "#{@dir}/output/#{@relative_dists_dir}"
+    assert_equal([true, ""],
+                 run_command("#{@base_dir}/#{@relative_dists_dir}",
+                             "#{@incoming_dir}/#{@relative_dists_dir}",
+                             output_dists_dir))
+    output_release = read_content("#{output_dists_dir}/Release")
+    assert_equal(
+      [
+        "amd64 i386",
+        read_content("#{@all_dists_dir}/main/binary-amd64/Packages"),
+        read_content("#{@incoming_dists_dir}/main/Contents-i386.gz"),
+        read_content("#{@incoming_dists_dir}/main/binary-i386/Packages"),
+        read_content("#{@incoming_dists_dir}/main/binary-i386/Packages.gz"),
+        read_content("#{@incoming_dists_dir}/main/binary-i386/Packages.xz"),
+        read_content("#{@incoming_dists_dir}/main/binary-i386/Release"),
+      ],
+      [
+        output_release[/^Architectures: (.+)$/, 1],
+        read_content("#{output_dists_dir}/main/binary-amd64/Packages"),
+        read_content("#{output_dists_dir}/main/Contents-i386.gz"),
+        read_content("#{output_dists_dir}/main/binary-i386/Packages"),
+        read_content("#{output_dists_dir}/main/binary-i386/Packages.gz"),
+        read_content("#{output_dists_dir}/main/binary-i386/Packages.xz"),
+        read_content("#{output_dists_dir}/main/binary-i386/Release"),
+      ])
+  end
+
+  def test_unsupported_format
+    packages_path = "#{@base_dists_dir}/main/binary-amd64/Packages"
+    FileUtils.rm_f(["", ".gz", ".xz"].collect do |extension|
+                     "#{packages_path}#{extension}"
+                   end)
+    FileUtils.touch("#{packages_path}.zst")
+    output_dists_dir = "#{@dir}/output/#{@relative_dists_dir}"
+    result = nil
+    _, error = capture_output do
+      result = run_command("#{@base_dir}/#{@relative_dists_dir}",
+                           "#{@incoming_dir}/#{@relative_dists_dir}",
+                           output_dists_dir)
+    end
+    assert_equal([
+                   [false, ""],
+                   "Unsupported format: #{packages_path}.zst\n",
+                 ],
+                 [
+                   result,
+                   error,
+                 ])
   end
 end
